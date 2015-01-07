@@ -45,7 +45,7 @@ class GraphiteQueue(Queue):
         except Full:
             LOG.error("DROPPED LINE: %s", value)
             return False
-        return True 
+        return True
 
 class GraphiteSenderThread(threading.Thread):
     """ Sender threads that connects to graphite servers and will send data to it. """
@@ -62,7 +62,7 @@ class GraphiteSenderThread(threading.Thread):
         self.can_kill = False
         self.batchsize = batchsize
         self.reconnect_interval = reconnect_interval
-    
+
     def connect(self):
         """ connects to the host """
         TRIES = 0
@@ -91,7 +91,7 @@ class GraphiteSenderThread(threading.Thread):
                     LOG.warning('[ %s ] Connection attempt failed to %s:%d: %s', self.name, self.hostname, self.port, msg)
             time.sleep(.2*TRIES)
         if not result:
-            LOG.error('[ %s ] giving up on connection to %s; too many tries'%(self.name,self.hostname))   
+            LOG.error('[ %s ] giving up on connection to %s; too many tries'%(self.name,self.hostname))
         return result
 
     def disconnect(self):
@@ -129,7 +129,7 @@ class GraphiteSenderThread(threading.Thread):
     def report(self):
         """ reports on the current thread state. """
         LOG.info("[ %s ] REPORT - %s - sent: %d - queued: %d"%(self.name,self.hostname,self.counter,self.queue.qsize()))
-    
+
     def send(self):
         """
         sends data across to the graphite server.
@@ -141,7 +141,7 @@ class GraphiteSenderThread(threading.Thread):
                 content += self.queue.get()
                 self.counter += 1
         self.connection.sendall(content)
-    
+
     def run(self):
         """
         Main loop to send data over.
@@ -149,6 +149,7 @@ class GraphiteSenderThread(threading.Thread):
         """
         while not self.can_kill:
             if self.counter%(self.reconnect_interval) < self.batchsize:
+                LOG.debug("[ %s ] Reconnecting..."%self.name)
                 self.disconnect()
                 if not self.connect():
                     LOG.error("[ %s ] could not initiate connection to %s. Killing..."%(self.name,self.hostname))
@@ -164,22 +165,28 @@ class GraphiteSenderThread(threading.Thread):
 
 class WhisperReader:
     """ Reads whisper files (graphite content) and processes it. """
-    def __init__(self,file='',root='',graphite_threads=[]):
+    def __init__(self,file='',root='',graphite_threads=[],before_timestamp=0,after_timestamp=0):
         """ constructor """
         self.file = file
         self.root = root
         self.metric_name = whisperToMetric(self.file)
         self.metrics = []
         self.graphite_threads = graphite_threads
+        self.before_timestamp = before_timestamp
+        self.after_timestamp = after_timestamp
         LOG.debug('metric file: %s\nmetric root: %s\nmetric name: %s'%(self.file,self.root,self.metric_name))
 
     def read(self):
         """ reads from the source file and populates the metric array """
         #LOG.info("Whisper Reading ource file: %s"%(os.path.join(self.root,self.file)))
         try:
-            lines = subprocess.check_output([ WHISPER_BIN, os.path.join(self.root,self.file) ])
-            for line in lines.split('\n'):
-                temp_timestamp,temp_value = line.split('\t')
+            before_param = "" if self.before_timestamp == 0 else "--until=%s"%str(self.before_timestamp)
+            after_param = "" if self.after_timestamp == 0 else "--from=%s"%str(self.after_timestamp)
+	    LOG.debug(str([ WHISPER_BIN, after_param, before_param, os.path.join(self.root,self.file) ]))
+            result = subprocess.Popen([ WHISPER_BIN, after_param, before_param, os.path.join(self.root,self.file) ], stdout=subprocess.PIPE)
+            for line in result.stdout:
+		linestrip = string.strip(line)
+                temp_timestamp,temp_value = linestrip.split('\t')
                 if temp_value != "None":
                     self.metrics.append("%s %s %s"%(self.metric_name,temp_value,temp_timestamp))
             LOG.debug("Whisper Reading completed for file %s"%(os.path.join(self.root,self.file)))
@@ -209,8 +216,8 @@ class WhisperReader:
         return True
 
 
-                
- 
+
+
 class TextReader:
     """ Reads classic test files (graphite content) and processes it. """
     def __init__(self,file='',root='',graphite_threads=[]):
@@ -303,7 +310,7 @@ class FeederThread(threading.Thread):
         self.can_kill = False
         self.graphite_threads = graphite_threads
         self.before_timestamp = before_timestamp
-        self.after_timestamp = after_timestamphreads = graphite_threads
+        self.after_timestamp = after_timestamp
 
     def add_txtfile(self,txtfile):
         self.txtfiles.append(txtfile)
@@ -316,7 +323,7 @@ class FeederThread(threading.Thread):
 
     def status(self):
         return len(self.txtfiles)+len(self.wspfiles)
-        
+
     def run(self):
         # is there any work?
         LOG.info("[ %s ] starting feeder thread"%self.name)
@@ -340,10 +347,10 @@ class FeederThread(threading.Thread):
                     LOG.error("[ %s ] %s NOT loaded #SHOULDRETRY"%(self.name,txtfile))
                 else:
                     LOG.info("[ %s ] %s loaded up"%(self.name,txtfile))
-            
+
             elif len(self.wspfiles):
                 wspfile = self.wspfiles.pop()
-                wspObj = WhisperReader(file=wspfile,root=self.path,graphite_threads=self.graphite_threads)
+                wspObj = WhisperReader(file=wspfile,root=self.path,graphite_threads=self.graphite_threads,before_timestamp=self.before_timestamp,after_timestamp=self.after_timestamp)
                 # if the feed failed, we stop and don't do anything
                 if not wspObj.read() or not wspObj.feed():
                     LOG.error("[ %s ] %s NOT loaded #SHOULDRETRY"%(self.name,wspfile))
@@ -358,7 +365,7 @@ def check_epoch_timestamp(i__timestamp):
     validates that the timestamp is correctly interpreted.
     """
     time.gmtime(int(i__timestamp))
-    
+
 
 def setup_logging(level=logging.INFO,logfile=DEFAULT_LOG, max_bytes=None, backup_count=None):
     """Sets up logging and associated handlers."""
@@ -415,15 +422,15 @@ def parse_cmdline(argv):
     parser.add_option('-B', '--after', dest='AFTER_TIMESTAMP', metavar='AFTER_TIMESTAMP',
                         type="int",
                         default=int(time.time()-(60*60*24*7)),           # defaults to 7 days ago
-                        help='lower timestamp limit') 
-    
+                        help='lower timestamp limit')
+
     (options, args) = parser.parse_args(args=argv[1:])
 
     if len(args) == 0:
         parser.error('No graphite destination server found')
     if not options.TEST_GRAPHITE and not options.INPUT_FILE:
         parser.error('No input file specified')
-    
+
     return (options, args)
 
 def simulate_data(i__metric_name,i__before,i__after):
@@ -452,12 +459,12 @@ def main(i__argv):
         setup_logging(level=logging.DEBUG)
     else:
         setup_logging()
-    
+
     list_graphite_threads = []
 
     # spawning all the graphite sender threads
     for i in graphite_destinations:
-        
+
         server = string.split(i,':')
         if len(server) == 1:
             list_graphite_threads.append(GraphiteSenderThread(hostname=i,batchsize=options.BATCHSIZE,reconnect_interval=options.RECONNECT_INTERVAL))
@@ -467,12 +474,12 @@ def main(i__argv):
     # starting the threads!
     for thread in list_graphite_threads:
         thread.start()
-   
-    # starting the controller thread. 
+
+    # starting the controller thread.
     controller = ControllerThread(list_graphite_threads)
     controller.start()
-    
-    
+
+
     # Are we in simulation mode?
     if options.TEST_GRAPHITE:
         LOG.info('[Simulation mode]')
@@ -511,19 +518,16 @@ def main(i__argv):
     while STATUS:
         STATUS=False
         if feeder.is_alive() and feeder.status() == 0:
-            feeder.kill() 
+            feeder.kill()
         for i in list_graphite_threads:
             if i.qsize() == 0 and not feeder.is_alive():
                 i.kill()
             STATUS = (STATUS or i.is_alive())
             time.sleep(1)
     controller.kill()
-    
+
 
 # ______ MAIN _______
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv))
-
-
-

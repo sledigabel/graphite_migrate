@@ -81,7 +81,7 @@ class GraphiteSenderThread(threading.Thread):
                 try:
                     self.connection = socket.socket(family, socktype, proto)
                     # pretty resilient timeout.
-                    self.connection.settimeout(15)
+                    self.connection.settimeout(30)
                     self.connection.connect(sockaddr)
                     # WHOOOOO connected :-)
                     LOG.info('%s - Connection to %s was successful'%(self.name,str(sockaddr)))
@@ -103,7 +103,7 @@ class GraphiteSenderThread(threading.Thread):
             pass
 
     def can_enqueue(self):
-        return (self.queue.qsize() < self.max_enqueued or max_enqueued < 0 )
+        return (self.queue.qsize() < self.max_enqueued or self.max_enqueued < 0 )
 
     def enqueue(self, line):
         """ Adds metric line into the thread queue to be sent. """
@@ -128,7 +128,8 @@ class GraphiteSenderThread(threading.Thread):
 
     def report(self):
         """ reports on the current thread state. """
-        LOG.info("[ %s ] REPORT - %s - sent: %d - queued: %d"%(self.name,self.hostname,self.counter,self.queue.qsize()))
+        status = "ALIVE" if self.is_alive() else "DEAD"
+        LOG.info("[ %s ] REPORT - %s - %s - sent: %d - queued: %d"%(self.name,status,self.hostname,self.counter,self.queue.qsize()))
 
     def send(self):
         """
@@ -140,7 +141,17 @@ class GraphiteSenderThread(threading.Thread):
             if not self.queue.empty():
                 content += self.queue.get()
                 self.counter += 1
-        self.connection.sendall(content)
+	retries = 0
+        success = False
+	while not success and retries < 10:
+            try:
+	        self.connection.sendall(content)
+                success = True
+            except:
+                LOG.warning("[ %s ] Connection timed out, retrying"%self.name)
+                retries += 1
+                time.sleep(5)
+
 
     def run(self):
         """
@@ -322,7 +333,7 @@ class FeederThread(threading.Thread):
         self.can_kill = True
 
     def status(self):
-        return len(self.txtfiles)+len(self.wspfiles)
+        return ((len(self.txtfiles) == 0) and (len(self.wspfiles) == 0))
 
     def run(self):
         # is there any work?
@@ -330,7 +341,7 @@ class FeederThread(threading.Thread):
         if len(self.graphite_threads) == 0:
             return
 
-        while (not self.can_kill) or ( len(self.txtfiles)) or (len(self.wspfiles)):
+        while (not self.can_kill) or not self.status():
 
             # can we push stuffs through?
             for server in self.graphite_threads:
@@ -357,7 +368,11 @@ class FeederThread(threading.Thread):
                 else:
                     LOG.info("[ %s ] %s loaded up"%(self.name,wspfile))
             time.sleep(1)
-        LOG.info("[ %s ] terminating..."%self.name)
+
+        if self.can_kill:
+            LOG.info("[ %s ] terminating (Killed)..."%self.name)
+        else:
+            LOG.info("[ %s ] terminating..."%self.name)
 
 
 def check_epoch_timestamp(i__timestamp):
@@ -514,16 +529,18 @@ def main(i__argv):
         fd.close()
 
 
+    while not feeder.status():
+	time.sleep(5)
+
     STATUS=True
     while STATUS:
         STATUS=False
-        if feeder.is_alive() and feeder.status() == 0:
-            feeder.kill()
         for i in list_graphite_threads:
-            if i.qsize() == 0 and not feeder.is_alive():
+            if i.qsize() == 0:
                 i.kill()
             STATUS = (STATUS or i.is_alive())
             time.sleep(1)
+    feeder.kill()
     controller.kill()
 
 
@@ -531,3 +548,5 @@ def main(i__argv):
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv))
+
+

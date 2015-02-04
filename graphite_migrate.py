@@ -528,9 +528,8 @@ def main(i__argv):
                 LOG.error('Unable to find file %s (from %s)'%(os.path.join(options.ABSOLUTE_PATH,file),options.INPUT_FILE))
         fd.close()
 
-
-    while not feeder.status():
-	time.sleep(5)
+    while (not options.TEST_GRAPHITE and not feeder.status()):
+	        time.sleep(5)
 
     STATUS=True
     while STATUS:
@@ -540,7 +539,8 @@ def main(i__argv):
                 i.kill()
             STATUS = (STATUS or i.is_alive())
             time.sleep(1)
-    feeder.kill()
+    if not options.TEST_GRAPHITE:
+        feeder.kill()
     controller.kill()
 
 

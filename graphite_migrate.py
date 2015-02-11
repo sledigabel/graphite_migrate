@@ -37,7 +37,7 @@ WHISPER_BIN = 'whisper-fetch'
 class GraphiteQueue(Queue):
     """ dedicated queue for designated graphite servers. """
 
-    def nput(self, value)
+    def nput(self, value):
         """A nonblocking put, that simply logs and discards the value when the
            queue is full, and returns false if we dropped."""
         try:

@@ -498,7 +498,7 @@ def main(i__argv):
     # Are we in simulation mode?
     if options.TEST_GRAPHITE:
         LOG.info('[Simulation mode]')
-        rubbish = simulate_data('graphite.migrate.TEST',options.BEFORE_TIMESTAMP,options.AFTER_TIMESTAMP)
+        rubbish = simulate_data('graphite.migrate.data',options.BEFORE_TIMESTAMP,options.AFTER_TIMESTAMP)
         for i in list_graphite_threads:
             for j in rubbish:
                 i.enqueue(j)
